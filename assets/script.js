@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sync theme-color meta tag with the CSS color cycle
     syncThemeColor(colorCycleDuration, now);
 
-    // Fetch updown.io status and render mini status page
+    // Fetch the status and render mini status page
     fetchStatus();
 });
 
@@ -22,7 +22,7 @@ let initialRenderDone = false;
 
 async function fetchStatus() {
     const section = document.getElementById('status-section');
-    if (!section || typeof UPDOWN_API_KEY === 'undefined') return;
+    if (!section || typeof STATUS_URL === 'undefined') return;
 
     // Show loading placeholder
     section.innerHTML = `<div class="status-loading">
@@ -33,21 +33,12 @@ async function fetchStatus() {
     </div>`;
 
     try {
-        // Fetch checks list
-        const response = await fetch(`https://updown.io/api/checks?api-key=${UPDOWN_API_KEY}`);
+        // This page's checks, each with its downtimes, from the updown-status
+        // Worker (it holds the updown key and the list of checks to show)
+        const response = await fetch(STATUS_URL);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         cachedChecks = await response.json();
-
-        // Fetch downtimes for each check in parallel
-        const downtimePromises = cachedChecks.map(check =>
-            fetch(`https://updown.io/api/checks/${check.token}/downtimes?api-key=${UPDOWN_API_KEY}`)
-                .then(r => r.ok ? r.json() : [])
-                .catch(() => [])
-        );
-        cachedDowntimes = await Promise.all(downtimePromises);
-
-        // Filter services based on INCLUDE_SERVICES / EXCLUDE_SERVICES from config
-        applyServiceFilter();
+        cachedDowntimes = cachedChecks.map(check => check.downtimes || []);
 
         renderStatus();
 
@@ -55,7 +46,7 @@ async function fetchStatus() {
         window.addEventListener('resize', debounce(renderStatus, 200));
 
     } catch (err) {
-        console.error('Failed to fetch updown.io status:', err);
+        console.error('Failed to fetch status:', err);
         section.innerHTML = '<div class="status-header status-warn">Status unavailable</div>';
     }
 }
@@ -206,30 +197,6 @@ function buildUptimeBar(downtimes, isCurrentlyDown, numDays, createdAt) {
     bars += '</div>';
 
     return bars;
-}
-
-/**
- * Filter cachedChecks/cachedDowntimes based on config.
- * INCLUDE_SERVICES (allowlist) takes priority over EXCLUDE_SERVICES (blocklist).
- */
-function applyServiceFilter() {
-    if (!cachedChecks || !cachedDowntimes) return;
-
-    let filterFn;
-    if (typeof INCLUDE_SERVICES !== 'undefined' && INCLUDE_SERVICES.length) {
-        filterFn = check => INCLUDE_SERVICES.includes(check.alias);
-    } else if (typeof EXCLUDE_SERVICES !== 'undefined' && EXCLUDE_SERVICES.length) {
-        filterFn = check => !EXCLUDE_SERVICES.includes(check.alias);
-    } else {
-        return;
-    }
-
-    const keep = [];
-    cachedChecks = cachedChecks.filter((check, i) => {
-        if (filterFn(check)) { keep.push(i); return true; }
-        return false;
-    });
-    cachedDowntimes = keep.map(i => cachedDowntimes[i]);
 }
 
 function debounce(fn, ms) {
